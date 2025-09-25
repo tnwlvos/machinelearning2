@@ -26,11 +26,11 @@ def Divide_data_set(new_xy_np,train,test):
     data=pd.DataFrame(Training_set)
 
     
-    Training_set=data.to_numpy(dtype="float64")#데이터 프레임을 넘파이 배열로 형변환
+    Training_set=data.to_numpy(dtype="float32")#데이터 프레임을 넘파이 배열로 형변환
     data=pd.DataFrame(Test_set)
 
 
-    Test_set=data.to_numpy(dtype="float64")#데이터 프레임을 넘파이 배열로 형변환
+    Test_set=data.to_numpy(dtype="float32")#데이터 프레임을 넘파이 배열로 형변환
     
     
     return Training_set,Test_set
@@ -50,7 +50,7 @@ def One_Hot_Encoding(data_y):
         
     return one_hot_y
 data=pd.read_csv("C:\\Users\\USER\\Downloads\\NN_data.csv")
-data=np.array(data)
+data=np.array(data, dtype=np.float32)
 train=7
 test=3
 train,test=Divide_data_set(data.copy(), train, test)
@@ -72,3 +72,8 @@ optimizer=keras.optimizers.SGD(learning_rate=0.1)
 model.compile(loss='categorical_crossentropy',optimizer=optimizer, metrics=["accuracy"])
 
 history = model.fit(x_train,t_train,epochs=100,validation_data = (x_test, t_test))
+
+pd.DataFrame(history.history).plot()
+plt.grid(True)
+plt.gca().set_ylim(0.1)
+plt.show()
