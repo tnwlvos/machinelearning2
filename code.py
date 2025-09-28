@@ -4,7 +4,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.lines import Line2D
-
+from tensorflow.keras.datasets import mnist
+from tensorflow.keras.datasets import fashion_mnist
+from tensorflow.keras.callbacks import Callback
 
 #특정 데이터 셋을 train, test set으로 나눠주는 함수
 def Divide_data_set(new_xy_np,train,test): 
@@ -49,31 +51,74 @@ def One_Hot_Encoding(data_y):
         one_hot_y[k,:]=(data_y[k]==Q_class)
         
     return one_hot_y
-data=pd.read_csv("C:\\Users\\USER\\Downloads\\NN_data.csv")
+data=pd.read_csv("C:\\Users\\User\\Downloads\\NN_data.csv")
 data=np.array(data, dtype=np.float32)
 train=7
 test=3
-train,test=Divide_data_set(data.copy(), train, test)
-x_train=train[:,:3]
-t_train=train[:,3]
-x_test=test[:,:3]
-t_test=test[:,3]
-t_train=One_Hot_Encoding(t_train)
-t_test=One_Hot_Encoding(t_test)
+
+
+
+class StepHistory(Callback):
+    def on_train_begin(self, logs=None):
+        self.step_losses = []
+        self.step_acc = []
+
+    def on_train_batch_end(self, batch, logs=None):
+        self.step_losses.append(logs.get('loss'))
+        self.step_acc.append(logs.get('accuracy'))
+
+step_history = StepHistory()
+# train,test=Divide_data_set(data.copy(), train, test)
+
+# x_train=train[:,:3]
+# y_train=train[:,3]
+# x_test=test[:,:3]
+# y_test=test[:,3]
+# (x_train, y_train),(x_test, y_test)=mnist.load_data()
+(x_train, y_train),(x_test, y_test)=fashion_mnist.load_data()
+
+y_train=One_Hot_Encoding(y_train)
+y_test=One_Hot_Encoding(y_test)
 model=keras.models.Sequential([
+    keras.layers.Flatten(input_shape=(28,28)),   
+    keras.layers.Dense(units= 1024, activation='relu'),
+    keras.layers.Dense(units= 1024, activation='relu'),
     keras.layers.Dense(units= 1024, activation='relu'),
     keras.layers.Dense(units= 1024, activation='relu'),
     keras.layers.Dense(units= 1024, activation='relu'),
     keras.layers.Dense(units= 512, activation='relu'),
-    keras.layers.Dense(units= 6, activation='softmax'),
+    keras.layers.Dense(units= 10, activation='softmax'),
     ])
 
-optimizer=keras.optimizers.SGD(learning_rate=0.1)
+optimizer=keras.optimizers.Adam(learning_rate=0.001)
 model.compile(loss='categorical_crossentropy',optimizer=optimizer, metrics=["accuracy"])
 
-history = model.fit(x_train,t_train,epochs=100,validation_data = (x_test, t_test))
+history = model.fit(x_train,y_train,epochs=50,batch_size=32,validation_data = (x_test, y_test), verbose=1,callbacks=[step_history])
 
 pd.DataFrame(history.history).plot()
+
+plt.title("optimizer=SGD")
+plt.xlabel("epoch")
+plt.ylabel("loss,acc")
 plt.grid(True)
-plt.gca().set_ylim(0.1)
+plt.gca().set_ylim(0.1,1.0)
+plt.xlim(0,10)
+plt.show()
+
+
+step = 1875 
+#  Step 단위 그래프
+plt.figure(figsize=(12,4))
+plt.subplot(1,2,1)
+plt.plot(step_history.step_losses,label="Loss")
+plt.plot(step_history.step_acc,label="acc")
+plt.title("Train Loss+Accuracy (per step)")
+plt.gca().set_ylim(0,1.0)
+
+plt.xlabel("Step")
+plt.ylabel("Loss or Accuracy")
+plt.legend()
+plt.xticks(range(0, len(step_history.step_losses)+1, step))
+plt.yticks(np.arange(0, 1.2, 0.1))
+plt.grid(True)
 plt.show()
