@@ -1,0 +1,639 @@
+
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+from matplotlib.lines import Line2D
+
+
+#시그모이드 함수
+def logistic(z):
+    
+    logi=1/(1+np.exp(-z))
+    
+    return logi
+
+def Difflogi(z):
+    return z*(1-z)
+
+
+
+#ReLU 함수
+def LeakyReLU(z):
+    
+   
+    relu=np.where(z>0,z,0.01*z)
+   
+    return relu
+
+def DiffLeakyReLU(z):
+    diffrelu=np.where(z>0,1,0.01)
+    return diffrelu
+
+def Softmax(z):
+    # return np.exp(z)/np.sum(np.exp(z))
+    shift=z-np.max(z,axis=0,keepdims=True) #안정화
+    exp_z=np.exp(shift)
+    return exp_z/np.sum(exp_z,axis=0,keepdims=True)
+    
+#conv layer_forward
+def Convolutional_Layer_forward(data,size,num,ft):
+    #size:filter size 
+    #num:filter 개수
+    #ft: filter 
+    ft_size=size
+    
+    ft_num=num
+    ft=ft
+    
+    #이미지의 크기 계산
+    image_x=data.shape[1]
+    image_y=data.shape[0]
+    
+    #img_np의 크기를 구하기 위한 값 
+    out_h=image_y-ft_size+1
+    out_w=image_x-ft_size+1
+    
+    #img list 초기화
+    img_list=[]
+    #img_list에 필터의 영역만큼 flatten한 image값을 넣음
+    for k in np.arange(image_y-ft_size+1):
+        for j in np.arange(image_x-ft_size+1):
+            img_list.append(data[k:ft_size+k,j:ft_size+j].flatten())
+    #img_list를 넘파이 배열로 변환
+    img_np=np.array(img_list)
+    #conv 계산
+    conv=img_np@ft
+    #배열 재정렬
+    conv_3d = conv.reshape(ft_num,out_h,out_w)  
+    #활성화 함수 통과
+    conv_relu=LeakyReLU(conv_3d)
+    
+ 
+    
+    return conv_relu,conv_3d,img_np,out_h,out_w
+
+#conv backward 계산
+def Convolutional_Layer_backward(legacy_conv_3d,img_np_list, ft, ft_size, out_h, out_w, learningrate):
+    #필터 개수를 파악 
+    ft_num=legacy_conv_3d.shape[0]
+    #conv는 가져온 legacy를 이전(backward의결과)의 conv형태로 변환시킴
+    conv=legacy_conv_3d.reshape(ft_num, -1).T 
+    #이전에 구해놓은 img_np_list를 사용해 filter를 업데이트 시킬 값을 구함
+    ft_update=img_np_list.T@conv   
+    #filter 업데이트                
+    ft-=learningrate*ft_update
+
+    return ft
+    
+#one-hot encoding함수
+def One_Hot_Encoding(data_y):
+    N=len(data_y)#데이터의 총 개수
+    Q_class=np.unique(data_y)#클래스 종류
+    Q=len(Q_class)#클래스 개수
+    
+    #one-hot-y초기화
+    one_hot_y=np.zeros([N,Q])
+    #각 클래스에 대해 One-Hot 표현으로 변환
+    for k in np.arange(0,N,1):
+        #해당 비교값이 자동으로 float형으로 변환 되어 저장됨(넘파이 배열 특징)
+        one_hot_y[k,:]=(data_y[k]==Q_class)
+        
+    return one_hot_y
+
+
+#오차 역전파알고리즘(batch size 조절가능)leakyReLU함수+softmax 함수
+def Error_Back_Propagation(Layer,Node,batch,epoch):
+    
+    #기본 설계를 위한 데이터셋 분할
+  
+    data_all=[]
+    label=[]
+    for i in range(3):  # 클래스 0~2
+        for k in range(1, 501):  # 각 클래스당 500개
+            path = f"C:\\Users\\이상훈\\OneDrive - 한국공학대학교\\바탕 화면\\인설\\mnist\\{i}_{k}.csv"
+            df = pd.read_csv(path, header=None).values.astype(np.float32)
+            data_all.append(df.flatten())
+            label.append(i)
+       
+    data_all = np.array(data_all)
+    label=np.array(label).reshape(-1, 1)
+    
+    # 정규화
+    data_all /= 255.0
+  
+    
+
+    # 기본 변수
+    input_N = data_all.shape[1]
+    # 출력 클래스 수
+    Q = len(np.unique(label))   
+    # 첫 번째 은닉층 노드 수
+    L = Node[0]     
+    # 전체 데이터 개수            
+    N = len(data_all)           
+    one = np.ones([N, 1])
+       
+ 
+    #히든 layer 노드 수 
+    L=Node[0]
+    #weight 값을 저장할 리스트 초기화
+    param=[]
+    #input노드와 연관된 weight 초기화 및 list에 저장
+    param.append(np.random.rand(L,input_N+1)*2-1)
+    #input과 출력 노드와 연관되어있지 않은 weight 초기화 및 list에 저장
+    for n in np.arange(0,Layer+1,1):
+        if (n+2)<=Layer:
+            # param.append(np.random.rand(Node[n+1],Node[n]+1)*2-1)
+            # He 초기화 (ReLU/LeakyReLU)
+            param.append(np.random.randn(Node[n+1],Node[n]+1) * np.sqrt(2.0/(Node[n]+1)))
+    #출력노드와 연관된 weight 초기화 및 list에 저장      
+    param.append(np.random.rand(Q,Node[-1]+1)*2-1)
+
+    param_all=[]
+    #학습률
+    learningrate=0.0005
+    #정확도와 mse값을 저장할 리스트 초기화
+    acc=[]
+    cee=[]
+  
+   
+    #에폭
+    for i in np.arange(0,epoch,1):
+        
+        #데이터셋 셔플
+        shuf=np.arange(N)
+        np.random.shuffle(shuf)
+        data_all=data_all[shuf]
+        label=label[shuf]
+        
+        
+        #y값 one-hot형태로 변환
+        one_hot_y=One_Hot_Encoding(label)
+        #더미노드를 추가한 x데이터 생성
+        x=np.concatenate((data_all,one),axis=1)
+        one_hot_y=one_hot_y.T
+        a1_all=[]
+        b1_all=[]
+   
+        #데이터 업데이트
+        for n in np.arange(0,N,batch):         
+            #배치 사이즈와 데이터셋이 나누어 떨어지지 않을 때를 위해 구함
+            learnparam=[]
+            maxN = min(batch, N - n) 
+            one1=np.ones([1,maxN])
+            
+            
+            #순전파-------------------------------
+            #각 계층의 a와b값을 저장할 리스트 생성
+            a1=[]
+            b1=[]
+            for k in np.arange(0,Layer+1,1):
+                #첫루프에선 입력값(x값)이 들어가야함
+                if k==0:
+                    a1.append(param[k]@x[n:n+maxN,:].T)  
+                    b1.append(LeakyReLU(a1[k]))
+                    # b1.append(logistic(a1[k]))
+                    b1[k]=np.concatenate((b1[k],one1),axis=0)
+                #마지막 루프에선 더미노드를 붙일 필요 없음
+                elif k==Layer:
+                    a1.append(param[k]@b1[k-1])
+                    # b1.append(LeakyReLU(a1[k]))
+                    b1.append(Softmax(a1[k]))
+                    y_hat=b1[-1]       
+                    break
+                #첫루프와 마지막루프를 제외한 나머지 루프
+                else:
+                    a1.append(param[k]@b1[k-1])
+                    # b1.append(logistic(a1[k]))
+                    b1.append(LeakyReLU(a1[k]))
+                    b1[k]=np.concatenate((b1[k],one1),axis=0)
+               
+            #역전파------------------------------------
+            #손실함수로부터의 legacy를 구함
+            legacy=(y_hat-one_hot_y[:,n:n+maxN])
+            for k in np.arange(0,-Layer-1,-1):
+                #업데이트 이전의 weight값 저장
+                w_old=param[Layer+k]
+                #첫 legacy는 
+                if k==0:                    
+                    learnparam.append(learningrate*(legacy@b1[Layer-1].T))                                   
+                    legacy =w_old.T@legacy
+                    
+                #마지막 루프에선 입력항에 대한 legacy를 구할필요 없음    
+                elif k==(-Layer):
+                    learnparam.append(learningrate*(legacy@x[n:n+maxN,:]))
+                    break
+                #이외의 루프에선 반복되는 내용을 동작
+                else:
+                    #지금까지의 legacy와 해당 계층의 b값과의 곱을 통해 parameter업데이트 값을 구함
+                    learnparam.append(learningrate*(legacy@b1[Layer+k-1].T))
+                    #다음 계층으로 넘길 legacy를 구함
+                    legacy=w_old.T@(legacy*DiffLeakyReLU(b1[Layer+k][:Node[k],:]))
+                   
+                #더미노드를 제외하고 넘김
+                # legacy=(legacy[:-1,:]*Difflogi(b1[Layer+k-1][:-1,:])) 
+                legacy=(legacy[:-1,:]*DiffLeakyReLU(b1[Layer+k-1][:-1,:])) 
+                
+            #값 업데이트
+            for k in np.arange(0,len(param),1):
+                #batch에 맞게 learnparam값을 구함
+                learnparam[k]=learnparam[k]/maxN
+                #parameter업데이트(param 저장순서와 learnparam저장 순서가 반대임)
+                param[k]=param[k]-learnparam[Layer-k]
+            
+    
+        
+        #최종 업데이트     
+        for k in np.arange(0,Layer+1,1):
+            #전체에 대한 순전파----------------------------------
+            if k==0:
+                a1_all.append(param[k]@x.T)
+                # b1_all.append(logistic(a1_all[k]))
+                b1_all.append(LeakyReLU(a1_all[k]))
+                b1_all[k]=np.concatenate((b1_all[k],one.T),axis=0)
+            elif k==Layer:
+                a1_all.append(param[k]@b1_all[k-1])
+                b1_all.append(Softmax(a1_all[k]))
+                # b1_all.append(LeakyReLU(a1_all[k]))
+                y_hat_all=b1_all[-1]
+                
+            else:
+                a1_all.append(param[k]@b1_all[k-1])
+                # b1_all.append(logistic(a1_all[k]))
+                b1_all.append(LeakyReLU(a1_all[k]))
+                b1_all[k]=np.concatenate((b1_all[k],one.T),axis=0)
+          
+        #mse값과 cee값을 구함
+        cee.append(-np.mean(np.sum(one_hot_y*np.log(y_hat_all),axis=0)))
+        acc.append(Accuracy_max(one_hot_y,y_hat_all,N))
+        param_all.append(param)
+    return cee,acc,param_all
+
+
+
+
+
+
+
+
+
+
+
+#mnist_data cnn함수
+def Error_Back_Propagation1(Layer,Node,batch,epoch):
+     
+    #필터 초기화
+    ft_size=3
+    ft_num=3
+    chanel=1
+    ft=np.random.rand((ft_size*ft_size*chanel),ft_num)*2-1
+    
+    #image data를 미리 저장할 리스트
+    data_all = []
+    #각 이미지에 대한 label
+    label=[]
+    for i in range(3):
+        for k in range(1, 501):
+            path = f"C:\\Users\\이상훈\\OneDrive - 한국공학대학교\\바탕 화면\\인설\\mnist\\{i}_{k}.csv"
+            df = pd.read_csv(path, header=None).values.astype(np.float32)
+            data_all.append(df)
+            label.append(i)
+    #각각 넘파이 배열로 변환
+    data_all = np.array(data_all) 
+    label=np.array(label)
+   
+
+    #input데이터 속성 수
+    input_N=(28-ft_size+1)*(28-ft_size + 1)*ft_num
+ 
+   
+    #Output 클래스 수
+    Q=len(np.unique(label))
+     
+    #히든 layer 노드 수 
+    L=Node[0]
+    #weight 값을 저장할 리스트 초기화
+    param=[]
+    #input노드와 연관된 weight 초기화 및 list에 저장
+    param.append(np.random.rand(L,input_N+1)*2-1)
+    #input과 출력 노드와 연관되어있지 않은 weight 초기화 및 list에 저장
+    for n in np.arange(0,Layer+1,1):
+        if (n+2)<=Layer:
+            # param.append(np.random.rand(Node[n+1],Node[n]+1)*2-1)
+            # He 초기화 (ReLU/LeakyReLU)
+            param.append(np.random.randn(Node[n+1],Node[n]+1) * np.sqrt(2.0/(Node[n]+1)))
+    #출력노드와 연관된 weight 초기화 및 list에 저장      
+    param.append(np.random.rand(Q,Node[-1]+1)*2-1)
+
+    param_all=[]
+    #학습률
+    learningrate=0.0005
+    #정확도와 mse값을 저장할 리스트 초기화
+    acc=[]
+    cee=[]
+  
+   
+    #에폭
+    for i in np.arange(0,epoch,1):
+        
+        #conv 층--------------------
+        #데이터 셔플
+        shuf=np.arange(len(data_all))
+        np.random.shuffle(shuf)
+        data_all=data_all[shuf]
+        label=label[shuf]
+        
+        #전체 데이터를 저장할 리스트
+        X=[]
+        #img를 필터 크기에 맞게 flatten한 리스트
+        img_np_list=[]
+        #conv가 relu활성화 함수를 통과하기 이전 값
+        conv_3d_list=[]
+    
+        for i in np.arange(0,1500,1):
+            #data 정규화
+            data_np = data_all[i]/ 255.0  
+            #conv forward
+            data,conv_3d,img_np,out_h,out_w=Convolutional_Layer_forward(data_np,ft_size, ft_num,ft)   
+            img_np_list.append(img_np)
+            conv_3d_list.append(conv_3d)
+            #data flatten(이후 mlp에서 사용하기 위함)
+            data= data.flatten()   
+            #(1,자동)으로 reshape
+            data_x =data.reshape(1, -1) 
+            #x와 label(y)값을 합친 리스트 생성
+            data_list= np.concatenate((data_x,np.array([[label[i]]])),axis=1)
+            #전체 데이터 리스트에 추가
+            X.append(data_list)
+            
+        #전체 데이터 개수   
+        N=1500
+        #리스트를 넘파이 배열로 변환
+        data_conv=np.vstack(X)
+        #xdata 추출
+        data_x=data_conv[:,:input_N]
+        #ydata 추출
+        data_y=data_conv[:,input_N:input_N+1]
+        #-------------------------------
+        one = np.ones((data_x.shape[0], 1))
+        #y값 one-hot형태로 변환
+        one_hot_y=One_Hot_Encoding(data_y)
+        #더미노드를 추가한 x데이터 생성
+        x=np.concatenate((data_x,one),axis=1)
+        one_hot_y=one_hot_y.T
+        a1_all=[]
+        b1_all=[]
+   
+        #데이터 업데이트
+        for n in np.arange(0,N,batch):         
+            #배치 사이즈와 데이터셋이 나누어 떨어지지 않을 때를 위해 구함
+            learnparam=[]
+            maxN = min(batch, N - n) 
+            one1=np.ones([1,maxN])
+            
+            
+            #순전파-------------------------------
+            #각 계층의 a와b값을 저장할 리스트 생성
+            a1=[]
+            b1=[]
+            for k in np.arange(0,Layer+1,1):
+                #첫루프에선 입력값(x값)이 들어가야함
+                if k==0:
+                    a1.append(param[k]@x[n:n+maxN,:].T)  
+                    b1.append(LeakyReLU(a1[k]))
+                    # b1.append(logistic(a1[k]))
+                    b1[k]=np.concatenate((b1[k],one1),axis=0)
+                #마지막 루프에선 더미노드를 붙일 필요 없음
+                elif k==Layer:
+                    a1.append(param[k]@b1[k-1])
+                    # b1.append(LeakyReLU(a1[k]))
+                    b1.append(Softmax(a1[k]))
+                    y_hat=b1[-1]       
+                    break
+                #첫루프와 마지막루프를 제외한 나머지 루프
+                else:
+                    a1.append(param[k]@b1[k-1])
+                    # b1.append(logistic(a1[k]))
+                    b1.append(LeakyReLU(a1[k]))
+                    b1[k]=np.concatenate((b1[k],one1),axis=0)
+               
+            #역전파------------------------------------
+            #손실함수로부터의 legacy를 구함
+            legacy=(y_hat-one_hot_y[:,n:n+maxN])
+            for k in np.arange(0,-Layer-1,-1):
+                #업데이트 이전의 weight값 저장
+                w_old=param[Layer+k]
+                #첫 legacy는 
+                if k==0:                    
+                    learnparam.append(learningrate*(legacy@b1[Layer-1].T))                                   
+                    legacy =w_old.T@legacy
+                    
+                #마지막 루프에선 입력항에 대한 legacy를 구할필요 없음    
+                elif k==(-Layer):
+                    learnparam.append(learningrate*(legacy@x[n:n+maxN,:]))
+                    # (2029, batch) cnn으로 넘길 leacy를 구함
+                    legacy_cnn= param[0].T @ legacy
+                    # bias 제외
+                    legacy_cnn= legacy_cnn[:-1, :] 
+                                   
+                    for b in range(maxN):
+                        # relu 활성화함수 지나기 전의 conv를 이용해 relu의 미분을 계산
+                        relu_gradient=DiffLeakyReLU(conv_3d_list[n+b].flatten()) 
+
+                        # cnn backward로 넘길 gradient 계산
+                        legacy_conv=legacy_cnn[:, b]*relu_gradient  
+                        #conv layer의 최종형태 였던 형태로 변환
+                        legacy_conv_3d=legacy_conv.reshape(ft_num, out_h, out_w)
+                        #backward 실행
+                        ft = Convolutional_Layer_backward( legacy_conv_3d,img_np_list[n+b],ft,ft_size,out_h,out_w,learningrate)
+                    
+                    break
+                #이외의 루프에선 반복되는 내용을 동작
+                else:
+                    #지금까지의 legacy와 해당 계층의 b값과의 곱을 통해 parameter업데이트 값을 구함
+                    learnparam.append(learningrate*(legacy@b1[Layer+k-1].T))
+                    #다음 계층으로 넘길 legacy를 구함
+                    legacy=w_old.T@(legacy*DiffLeakyReLU(b1[Layer+k][:Node[k],:]))
+                   
+                #더미노드를 제외하고 넘김
+                # legacy=(legacy[:-1,:]*Difflogi(b1[Layer+k-1][:-1,:])) 
+                legacy=(legacy[:-1,:]*DiffLeakyReLU(b1[Layer+k-1][:-1,:])) 
+            
+                
+            #값 업데이트                
+            for k in np.arange(0,len(param),1):
+                #batch에 맞게 learnparam값을 구함
+                learnparam[k]=learnparam[k]/maxN
+                #parameter업데이트(param 저장순서와 learnparam저장 순서가 반대임)
+                param[k]=param[k]-learnparam[Layer-k]
+            
+        #업데이트 시킬 전체 데이터 리스트 
+        X_all = []
+        for i in range(len(data_all)):
+            #위와 같이 데이터 정규화
+            data_np = data_all[i] / 255.0
+            #필요없는 값은 제외하고 data값만 받아옴
+            data, _, _, _, _ = Convolutional_Layer_forward(data_np, ft_size, ft_num, ft)
+            #flatten해서 리스트에 삽입
+            X_all.append(data.flatten())
+        #넘파이 배열로 변환
+        X_all = np.array(X_all)
+        #최종 x에 추가될 더미 노드
+        one_all = np.ones((X_all.shape[0], 1))
+        #업데이트 이후 x
+        x_all = np.concatenate((X_all, one_all), axis=1)
+        #업데이트 이후 y
+        one_hot_y_all = One_Hot_Encoding(label.reshape(-1, 1)).T
+        #최종 업데이트     
+        for k in np.arange(0,Layer+1,1):
+            #전체에 대한 순전파----------------------------------
+            if k==0:
+                a1_all.append(param[k]@x_all.T)
+                # b1_all.append(logistic(a1_all[k]))
+                b1_all.append(LeakyReLU(a1_all[k]))
+                b1_all[k]=np.concatenate((b1_all[k],np.ones((1, X_all.shape[0]))),axis=0)
+            elif k==Layer:
+                a1_all.append(param[k]@b1_all[k-1])
+                b1_all.append(Softmax(a1_all[k]))
+                # b1_all.append(LeakyReLU(a1_all[k]))
+                y_hat_all=b1_all[-1]
+                
+            else:
+                a1_all.append(param[k]@b1_all[k-1])
+                # b1_all.append(logistic(a1_all[k]))
+                b1_all.append(LeakyReLU(a1_all[k]))
+                
+                
+                b1_all[k]=np.concatenate((b1_all[k],np.ones((1, X_all.shape[0]))),axis=0)
+       
+        #mse값과 cee값을 구함
+        cee.append(-np.mean(np.sum(one_hot_y_all*np.log(y_hat_all+ 1e-10),axis=0)))
+        acc.append(Accuracy_max(one_hot_y_all,y_hat_all,X_all.shape[0]))
+        param_all.append(param)
+    return cee,acc,param_all
+
+#정확도 구하는 함수   
+def Accuracy_max(one_hot_y,y_hat,N):#max기준
+    #예측결과를 저장 할 함수
+    
+    one_hot_y=one_hot_y.T
+    
+    y_hat_k=np.zeros([len(y_hat),y_hat.shape[1]])
+    #y_hat값 중한 열에 대해 최대값만 1로 변환 나머지는 0(넘파이 배열 특성:값을 바꿈)  
+    for i in np.arange(0,N,1):
+        y_hat_k[:,i]=(y_hat[:,i]==max(y_hat[:,i]))
+ 
+    acc=np.mean(np.all(one_hot_y == y_hat_k.T, axis=1))
+    return acc
+
+#특정 데이터 셋을 train, test set으로 나눠주는 함수
+def Divide_data_set(new_xy_np,train,test): 
+  
+    #가져온 데이터의 비율을 구함
+    rate=len(new_xy_np)//10
+    
+    #데이터 나눌 구간
+    train_rate=train*rate
+    test_rate=test*rate+train_rate
+    
+    #인덱스 셔플
+    np.random.shuffle(new_xy_np)
+    
+    #데이터set 나누기
+    Training_set=new_xy_np[0:train_rate,:]
+    Test_set=new_xy_np[train_rate:test_rate,:]
+    data=pd.DataFrame(Training_set,columns=['x0', 'x1','x2','y'])
+
+    
+    Training_set=data.to_numpy(dtype="float64")#데이터 프레임을 넘파이 배열로 형변환
+    data=pd.DataFrame(Test_set,columns=['x0', 'x1','x2','y'])
+
+
+    Test_set=data.to_numpy(dtype="float64")#데이터 프레임을 넘파이 배열로 형변환
+    
+    
+    return Training_set,Test_set
+
+
+
+#정확도 구하는 함수   
+def Accuracy_max(one_hot_y,y_hat,N):#max기준
+    #예측결과를 저장 할 함수
+    
+    one_hot_y=one_hot_y.T
+    
+    y_hat_k=np.zeros([len(y_hat),y_hat.shape[1]])
+    #y_hat값 중한 열에 대해 최대값만 1로 변환 나머지는 0(넘파이 배열 특성:값을 바꿈)  
+    for i in np.arange(0,N,1):
+        y_hat_k[:,i]=(y_hat[:,i]==max(y_hat[:,i]))
+ 
+    acc=np.mean(np.all(one_hot_y == y_hat_k.T, axis=1))
+    return acc
+
+#특정 데이터 셋을 train, test set으로 나눠주는 함수
+def Divide_data_set(new_xy_np,train,test): 
+  
+    #가져온 데이터의 비율을 구함
+    rate=len(new_xy_np)//10
+    
+    #데이터 나눌 구간
+    train_rate=train*rate
+    test_rate=test*rate+train_rate
+    
+    #인덱스 셔플
+    np.random.shuffle(new_xy_np)
+    
+    #데이터set 나누기
+    Training_set=new_xy_np[0:train_rate,:]
+    Test_set=new_xy_np[train_rate:test_rate,:]
+    data=pd.DataFrame(Training_set,columns=['x0', 'x1','x2','y'])
+
+    
+    Training_set=data.to_numpy(dtype="float64")#데이터 프레임을 넘파이 배열로 형변환
+    data=pd.DataFrame(Test_set,columns=['x0', 'x1','x2','y'])
+
+
+    Test_set=data.to_numpy(dtype="float64")#데이터 프레임을 넘파이 배열로 형변환
+    
+    
+    return Training_set,Test_set
+
+
+Node=[64,64,64]
+Layer=3
+batch=32
+epoch=5
+train=7
+test=3
+
+
+confusionmatrix=[]
+cee, acc, param = Error_Back_Propagation2(Layer,Node,batch,epoch)
+
+
+step=epoch
+#첫번째 그래프 (w그래프)
+
+new_x=np.arange(0,step,1)#새로운 x값을 (0~step)범위로 생성
+plt.figure(0,figsize=(10, 8))#두번째 그래프
+plt.title("acc,CEE",fontsize=20)#그래프 제목과 제목 폰트 사이즈 선정
+plt.plot(new_x,acc,color='r')#선형 그래프 출력
+
+plt.plot(new_x,cee,color='blue')#선형 그래프 출력
+
+plt.xticks(np.arange(0, step+1, 7), fontsize=15)
+plt.yticks(np.arange(0,1.3,0.1),fontsize=15)#그래프 y축 값 설정
+plt.xlim([0,step-1])#그래프의 y축 범위 설정
+plt.ylim([0,1.2])#그래프의 y축 범위 설정
+
+#라벨링
+plt.xlabel("epoch",size=20)#x축 이름 설정
+plt.ylabel("acc,cee",size=20)#y축 이름 설정
+legend_mse= [ Line2D([0], [0], color='red', markerfacecolor='none', label='acc')
+                ,Line2D([0], [0], color='blue', markerfacecolor='none', label='CEE')
+              ]
+#[0], [0], 이것은 더미값
+plt.grid(True)
+#레전드 생성
+plt.legend(handles=legend_mse,fontsize=20)
+plt.show()
