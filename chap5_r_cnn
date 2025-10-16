@@ -1,0 +1,162 @@
+
+import tensorflow as tf
+from tensorflow import keras
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+from matplotlib.lines import Line2D
+from tensorflow.keras.datasets import mnist
+from tensorflow.keras.datasets import fashion_mnist
+from tensorflow.keras.callbacks import Callback
+from sklearn.metrics import confusion_matrix, classification_report
+import seaborn as sns
+
+#one-hot encoding함수
+def One_Hot_Encoding(data_y):
+    N=len(data_y)#데이터의 총 개수
+    Q_class=np.unique(data_y)#클래스 종류
+    Q=len(Q_class)#클래스 개수
+
+    #one-hot-y초기화
+    one_hot_y=np.zeros([N,Q])
+    #각 클래스에 대해 One-Hot 표현으로 변환
+    for k in np.arange(0,N,1):
+        #해당 비교값이 자동으로 float형으로 변환 되어 저장됨(넘파이 배열 특징)
+        one_hot_y[k,:]=(data_y[k]==Q_class)
+
+    return one_hot_y
+# data=pd.read_csv("C:\Users\User\Downloads\NN_data.csv")
+# data=np.array(data, dtype=np.float32)
+train=7
+test=3
+
+
+
+class StepHistory(Callback):
+    def on_train_begin(self, logs=None):
+        self.step_losses = []
+        self.step_acc = []
+
+    def on_train_batch_end(self, batch, logs=None):
+        self.step_losses.append(logs.get('loss'))
+        self.step_acc.append(logs.get('accuracy'))
+
+step_history = StepHistory()
+# train,test=Divide_data_set(data.copy(), train, test)
+
+# x_train=train[:,:3]
+# y_train=train[:,3]
+# x_test=test[:,:3]
+# y_test=test[:,3]
+# (x_train, y_train),(x_test, y_test)=mnist.load_data()
+(x_train, y_train),(x_test, y_test)=fashion_mnist.load_data()
+
+y_train=One_Hot_Encoding(y_train)
+y_test=One_Hot_Encoding(y_test)
+
+class_names = ["T-shirt/top", "Trouser", "Pullover", "Dress", "Coat",
+               "Sandal", "Shirt", "Sneaker", "Bag", "Ankle boot"]
+model=keras.models.Sequential([
+    keras.layers.Conv2D(100,7,activation="relu",strides=(1,1),padding="same",input_shape=[28,28,1]),
+    keras.layers.AveragePooling2D((2,2)),
+    keras.layers.Flatten(),
+    keras.layers.Dense(units= 512, activation='relu'),
+    keras.layers.Dropout(0.25),
+    keras.layers.Dense(units= 256, activation='relu'),
+    keras.layers.Dropout(0.25),
+    keras.layers.Dense(units= 10, activation='softmax'),
+    ])
+
+optimizer=keras.optimizers.Adagrad(learning_rate=0.01)
+model.compile(loss='categorical_crossentropy',optimizer=optimizer, metrics=["accuracy"])
+
+history = model.fit(x_train,y_train,epochs=10,batch_size=32,validation_data = (x_test, y_test), verbose=1,callbacks=[step_history])
+
+model.save('fashion_cnn.h5')
+
+pd.DataFrame(history.history).plot()
+
+plt.title("optimizer=Adagrad")
+plt.xlabel("epoch")
+plt.ylabel("loss,acc")
+plt.grid(True)
+plt.xticks(np.arange(0, 10,1))
+plt.yticks(np.arange(0, 1.1, 0.1))
+plt.gca().set_ylim(0,1.0)
+plt.xlim(0,9)
+plt.show()
+
+
+
+
+y_pred = model.predict(x_test)
+y_pred_classes = np.argmax(y_pred, axis=1)
+y_true = np.argmax(y_test, axis=1)
+
+
+cm = confusion_matrix(y_true, y_pred_classes)
+
+
+plt.figure(figsize=(10,8))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+            xticklabels=class_names,
+            yticklabels=class_names)
+plt.xlabel("Predicted Label")
+plt.ylabel("True Label")
+plt.title("Confusion Matrix (Fashion-MNIST)")
+plt.show()
+
+step = 1875
+#  Step 단위 그래프
+plt.figure(figsize=(16,4))
+plt.subplot(1,2,1)
+plt.plot(step_history.step_losses,label="Loss")
+plt.plot(step_history.step_acc,label="acc")
+plt.title("Train Loss+Accuracy (per step)")
+plt.gca().set_ylim(0,1.0)
+
+plt.xlabel("Step")
+plt.ylabel("Loss or Accuracy")
+plt.legend()
+plt.xticks(range(0, len(step_history.step_losses)+1, step))
+plt.yticks(np.arange(0, 1.2, 0.1))
+plt.grid(True)
+plt.show()
+
+
+X_new= x_test[:5]
+Y_pred=np.argmax(model.predict(X_new),axis=1)
+print(Y_pred)
+
+plt.figure(figsize=(7,2))
+for index, image in enumerate(X_new):
+  plt.subplot(1,5,index+1)
+  plt.imshow(image)
+  plt.axis('off')
+  plt.title(class_names[Y_pred[index]],fontsize=12)
+
+plt.show()
+
+
+wrong_index_list=[]
+predict=model.predict(x_test)
+y_true = np.argmax(y_test, axis=1)
+y_pred = np.argmax(predict, axis=1)
+for index in range(5000):
+  if y_true[index] != y_pred[index]:
+    wrong_index_list.append(index)
+import random
+new_index=random.sample(wrong_index_list,5)
+wrong_X_new=x_test[new_index]
+
+plt.figure(figsize=(18,2))
+for index,image in enumerate(wrong_X_new):
+  plt.subplot(1,5,index+1)
+  plt.imshow(image)
+  plt.axis('off')
+
+  temp_Actial=class_names[y_true[new_index[index]]]
+  temp_Predict=class_names[y_pred[new_index[index]]]
+  title="Actial: {} Predict?: {}".format(temp_Actial,temp_Predict)
+  plt.title(title,fontsize=12)
+plt.show()
