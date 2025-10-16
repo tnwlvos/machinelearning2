@@ -9,154 +9,217 @@ from tensorflow.keras.datasets import mnist
 from tensorflow.keras.datasets import fashion_mnist
 from tensorflow.keras.callbacks import Callback
 from sklearn.metrics import confusion_matrix, classification_report
+from sklearn.model_selection import train_test_split
 import seaborn as sns
+import os
+import kagglehub
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
+from collections import Counter
+from tensorflow.keras.utils import to_categorical
 
-#one-hot encoding함수
-def One_Hot_Encoding(data_y):
-    N=len(data_y)#데이터의 총 개수
-    Q_class=np.unique(data_y)#클래스 종류
-    Q=len(Q_class)#클래스 개수
+from sklearn.preprocessing import LabelEncoder
+import selectivesearch
+import cv2
+import kagglehub
 
-    #one-hot-y초기화
-    one_hot_y=np.zeros([N,Q])
-    #각 클래스에 대해 One-Hot 표현으로 변환
-    for k in np.arange(0,N,1):
-        #해당 비교값이 자동으로 float형으로 변환 되어 저장됨(넘파이 배열 특징)
-        one_hot_y[k,:]=(data_y[k]==Q_class)
-
-    return one_hot_y
-# data=pd.read_csv("C:\Users\User\Downloads\NN_data.csv")
-# data=np.array(data, dtype=np.float32)
-train=7
-test=3
+# Download latest version
+path = kagglehub.dataset_download("paramaggarwal/fashion-product-images-small")
 
 
+# 1. styles.csv 읽기
+df = pd.read_csv(os.path.join(path, "styles.csv"), on_bad_lines='skip')
 
-class StepHistory(Callback):
-    def on_train_begin(self, logs=None):
-        self.step_losses = []
-        self.step_acc = []
+# 2. id와 articleType만 사용 (결측치 제거)
+df = df[['id', 'articleType']].dropna()
 
-    def on_train_batch_end(self, batch, logs=None):
-        self.step_losses.append(logs.get('loss'))
-        self.step_acc.append(logs.get('accuracy'))
+# 3. 이미지 경로 만들기
+df['image_path'] = df['id'].astype(str).apply(
+    lambda x: os.path.join(path, 'images', f"{x}.jpg")
+)
 
-step_history = StepHistory()
-# train,test=Divide_data_set(data.copy(), train, test)
+# 4. 실제 존재하는 이미지 파일만 필터링
+df = df[df['image_path'].apply(os.path.exists)].reset_index(drop=True)
 
-# x_train=train[:,:3]
-# y_train=train[:,3]
-# x_test=test[:,:3]
-# y_test=test[:,3]
-# (x_train, y_train),(x_test, y_test)=mnist.load_data()
-(x_train, y_train),(x_test, y_test)=fashion_mnist.load_data()
+# 5. X, y로 분리
+x_data = df['image_path'].values      # 이미지 경로 리스트
+y_data = df['articleType'].values     # 라벨
 
-y_train=One_Hot_Encoding(y_train)
-y_test=One_Hot_Encoding(y_test)
+# 라벨을 판다스로 묶어서 클래스별 개수 세기
+label_counts = Counter(y_data)
+#상위 15개의 라벨 추출
+top_labels=[label for label, _ in label_counts.most_common(15)]
 
-class_names = ["T-shirt/top", "Trouser", "Pullover", "Dress", "Coat",
-               "Sandal", "Shirt", "Sneaker", "Bag", "Ankle boot"]
-model=keras.models.Sequential([
-    keras.layers.Conv2D(100,7,activation="relu",strides=(1,1),padding="same",input_shape=[28,28,1]),
-    keras.layers.AveragePooling2D((2,2)),
-    keras.layers.Flatten(),
-    keras.layers.Dense(units= 512, activation='relu'),
-    keras.layers.Dropout(0.25),
-    keras.layers.Dense(units= 256, activation='relu'),
-    keras.layers.Dropout(0.25),
-    keras.layers.Dense(units= 10, activation='softmax'),
-    ])
+#클래스당 최대 개수
+max_num_class=30000//15
 
-optimizer=keras.optimizers.Adagrad(learning_rate=0.01)
-model.compile(loss='categorical_crossentropy',optimizer=optimizer, metrics=["accuracy"])
+#라벨과 최대 개수에 맞는 새로운 x,y 생성
+new_x=[]
+new_y=[]
+for label in top_labels:
+    indices=np.where(y_data==label)[0]
+    if len(indices)>max_num_class:
+        sample_indices=np.random.choice(indices,max_num_class,replace=False)
+    else:
+        sample_indices=indices
+    new_x.append(x_data[sample_indices])
+    new_y.append(y_data[sample_indices])
+ 
+class_sizes = [len(x) for x in new_x]
+min_class_size = min(class_sizes)  
 
-history = model.fit(x_train,y_train,epochs=10,batch_size=32,validation_data = (x_test, y_test), verbose=1,callbacks=[step_history])
 
-model.save('fashion_cnn.h5')
 
-pd.DataFrame(history.history).plot()
+# 모든 클래스를 동일한 수로 맞춤
+balanced_x = []
+balanced_y = []
+for i, label in enumerate(top_labels):
+    indices = np.random.choice(len(new_x[i]), min_class_size, replace=False)
+    balanced_x.append(new_x[i][indices])
+    balanced_y.append(new_y[i][indices])
 
-plt.title("optimizer=Adagrad")
-plt.xlabel("epoch")
-plt.ylabel("loss,acc")
-plt.grid(True)
-plt.xticks(np.arange(0, 10,1))
-plt.yticks(np.arange(0, 1.1, 0.1))
-plt.gca().set_ylim(0,1.0)
-plt.xlim(0,9)
+# 합치기
+balanced_x = np.concatenate(balanced_x)
+balanced_y = np.concatenate(balanced_y)
+
+
+new_x=np.array(balanced_x)
+new_y=np.array(balanced_y)
+
+
+
+
+def preprocess_image(img_path, target_size=(28, 28)):
+    img = load_img(img_path, target_size=target_size, color_mode='rgb')
+    img_array = img_to_array(img) / 255.0
+    return img_array
+
+# # 2차원 배열 new_x를 1차원 리스트로 변환
+# flat_new_x = np.concatenate(new_x)
+
+# 이미지 전처리
+x_processed = np.array([preprocess_image(p) for p in new_x])
+
+# new_y도 마찬가지로 1차원으로
+# flat_new_y = np.concatenate(new_y)
+
+# 라벨 인코딩 + 원핫 인코딩
+le = LabelEncoder()
+y_encoded = le.fit_transform(new_y)
+y_onehot = to_categorical(y_encoded)
+
+
+# 6. train/test 분할
+x_train, x_test, y_train, y_test = train_test_split(
+    x_processed,
+    y_onehot,
+    test_size=0.2,
+    random_state=42,
+    stratify=y_onehot.argmax(axis=1)  # stratify는 정수형 라벨로
+)
+
+
+new_model=keras.models.load_model("C:\\Users\\USER\\Desktop\\fashion_cnn2.h5")
+new_model.evaluate(x_test,y_test)
+
+# ✅ 여기서 class_names 자동 동기화
+class_names = list(le.classes_)
+
+
+img_dir="C:\\Users\\USER\\Desktop\\img2.png"
+img=cv2.imread(img_dir)
+temp_img=img.copy()
+_, regions = selectivesearch.selective_search(img,scale=400,min_size=1500)
+region_rects=[cand['rect'] for cand in regions]
+region_rects = np.array(region_rects[:3])
+
+bbox=[]
+bboxes=[]
+
+for rect in region_rects:
+    xmin=rect[0]
+    ymin=rect[1]
+    xmax=xmin+rect[2]
+    ymax=ymin+rect[3]
+    bbox=[(xmin,ymin,xmax,ymax)]
+    bboxes+=bbox
+
+bboxes=np.array(bboxes)
+for i,cands in enumerate(bboxes):
+    bb=cands
+    temp_img=cv2.rectangle(temp_img,(bb[0],bb[1]),(bb[2],bb[3]),color=(0,255,0),thickness=2)
+plt.imshow(temp_img)
+
+
+test_img=[]
+
+for i in range(len(bboxes)):
+    cropped_img = temp_img[bboxes[i][1]:bboxes[i][3], bboxes[i][0]:bboxes[i][2]]
+
+    # 너무 작은 영역은 무시
+    if cropped_img.shape[0] < 10 or cropped_img.shape[1] < 10:
+        continue
+
+    # 28x28으로 리사이즈
+    warped_img = cv2.resize(cropped_img, (28, 28), interpolation=cv2.INTER_LINEAR)
+
+    # 정규화 (float32)
+    warped_img = warped_img.astype('float32') / 255.0
+
+    test_img.append(warped_img)
+
+test_img = np.array(test_img)
+    
+    
+CNN_model=keras.models.load_model("C:\\Users\\USER\\Desktop\\fashion_cnn2.h5")
+
+
+y_pred_prob=CNN_model.predict(test_img)
+y_pred=np.argmax(y_pred_prob,axis=1)
+
+temp_img=img.copy()
+
+
+# for i, cands in enumerate(bboxes):
+#     bb=cands
+#     temp_img=cv2.rectangle(temp_img,(bb[0],bb[1]),(bb[2],bb[3]),color=(0,255,0),thickness=2)
+#     temp_img=cv2.putText(temp_img, str(y_pred[i]), (bb[0],bb[1]), 1 , 1, color=(255,0,0))
+# plt.imshow(temp_img)
+
+
+
+# bbox와 예측 결과 텍스트 출력 부분 수정
+for i, cands in enumerate(bboxes):
+    bb = cands
+    temp_img = cv2.rectangle(temp_img, (bb[0], bb[1]), (bb[2], bb[3]), color=(0, 255, 0), thickness=2)
+    
+    # 클래스명 가져오기
+    label = class_names[y_pred[i]] if y_pred[i] < len(class_names) else "Unknown"
+
+    
+    # 텍스트 위치, 폰트 크기, 색상 조정 (숫자 대신 이름 출력)
+    temp_img = cv2.putText(temp_img, label, (bb[0], bb[1]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+
+plt.imshow(cv2.cvtColor(temp_img, cv2.COLOR_BGR2RGB))  # OpenCV는 BGR, plt는 RGB이므로 변환해줌
+plt.axis('off')
 plt.show()
 
 
 
 
-y_pred = model.predict(x_test)
-y_pred_classes = np.argmax(y_pred, axis=1)
-y_true = np.argmax(y_test, axis=1)
 
-
-cm = confusion_matrix(y_true, y_pred_classes)
-
-
-plt.figure(figsize=(10,8))
-sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-            xticklabels=class_names,
-            yticklabels=class_names)
-plt.xlabel("Predicted Label")
-plt.ylabel("True Label")
-plt.title("Confusion Matrix (Fashion-MNIST)")
-plt.show()
-
-step = 1875
-#  Step 단위 그래프
-plt.figure(figsize=(16,4))
-plt.subplot(1,2,1)
-plt.plot(step_history.step_losses,label="Loss")
-plt.plot(step_history.step_acc,label="acc")
-plt.title("Train Loss+Accuracy (per step)")
-plt.gca().set_ylim(0,1.0)
-
-plt.xlabel("Step")
-plt.ylabel("Loss or Accuracy")
-plt.legend()
-plt.xticks(range(0, len(step_history.step_losses)+1, step))
-plt.yticks(np.arange(0, 1.2, 0.1))
-plt.grid(True)
-plt.show()
-
-
-X_new= x_test[:5]
-Y_pred=np.argmax(model.predict(X_new),axis=1)
-print(Y_pred)
-
-plt.figure(figsize=(7,2))
-for index, image in enumerate(X_new):
-  plt.subplot(1,5,index+1)
-  plt.imshow(image)
-  plt.axis('off')
-  plt.title(class_names[Y_pred[index]],fontsize=12)
-
-plt.show()
-
-
-wrong_index_list=[]
-predict=model.predict(x_test)
-y_true = np.argmax(y_test, axis=1)
-y_pred = np.argmax(predict, axis=1)
-for index in range(5000):
-  if y_true[index] != y_pred[index]:
-    wrong_index_list.append(index)
-import random
-new_index=random.sample(wrong_index_list,5)
-wrong_X_new=x_test[new_index]
-
-plt.figure(figsize=(18,2))
-for index,image in enumerate(wrong_X_new):
-  plt.subplot(1,5,index+1)
-  plt.imshow(image)
-  plt.axis('off')
-
-  temp_Actial=class_names[y_true[new_index[index]]]
-  temp_Predict=class_names[y_pred[new_index[index]]]
-  title="Actial: {} Predict?: {}".format(temp_Actial,temp_Predict)
-  plt.title(title,fontsize=12)
-plt.show()
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
